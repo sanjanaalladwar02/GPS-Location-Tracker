@@ -1,0 +1,87 @@
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+
+TinyGPSPlus gps;
+
+// GPS and GSM serial connections
+SoftwareSerial ss(3, 4);    // GPS TX, RX
+SoftwareSerial gsm(7, 8);   // GSM TX, RX
+
+// Button pins
+const int gpsButtonPin = 2;
+const int smsButtonPin = 6;
+
+bool gpsAvailable = false;
+
+void setup() {
+  pinMode(gpsButtonPin, INPUT_PULLUP);
+  pinMode(smsButtonPin, INPUT_PULLUP);
+
+  ss.begin(9600);
+  gsm.begin(9600);
+  Serial.begin(9600);
+
+  delay(5000);
+  gsm.println("AT");
+}
+
+void loop() {
+  static unsigned long gpsDebounce = 0;
+  static unsigned long smsDebounce = 0;
+
+  // GPS button pressed
+  if (digitalRead(gpsButtonPin) == LOW && millis() - gpsDebounce > 500) {
+    gpsDebounce = millis();
+    gpsAvailable = false;
+
+    unsigned long startTime = millis();
+    while (millis() - startTime < 5000) {
+      while (ss.available() > 0) {
+        gps.encode(ss.read());
+        if (gps.location.isUpdated()) {
+          gpsAvailable = true;
+          break;
+        }
+      }
+      if (gpsAvailable) break;
+    }
+  }
+
+  // SMS button pressed
+  if (digitalRead(smsButtonPin) == LOW && millis() - smsDebounce > 500) {
+    smsDebounce = millis();
+
+    if (gpsAvailable) {
+      sendSMSWithLocation();
+      gpsAvailable = false;
+    } else {
+      Serial.println("GPS location not available.");
+    }
+  }
+}
+
+void sendSMSWithLocation() {
+  if (gps.location.isValid()) {
+    float latitude = gps.location.lat();
+    float longitude = gps.location.lng();
+    float speed = gps.speed.kmph();
+    float course = gps.course.deg();
+
+    String location = "Latitude: " + String(latitude, 6) +
+                      ", Longitude: " + String(longitude, 6) +
+                      ", Speed: " + String(speed, 2) + " km/h" +
+                      ", Direction: " + String(course, 2) + " deg";
+
+    gsm.println("AT+CMGF=1");
+    delay(100);
+    gsm.println("AT+CMGS=\"+1234567890\"");
+    delay(100);
+    gsm.println(location);
+    delay(100);
+    gsm.write(26);
+
+    Serial.println("SMS sent: " + location);
+  } else {
+    Serial.println("Invalid GPS data.");
+  }
+}
